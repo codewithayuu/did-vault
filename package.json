@@ -1,0 +1,26 @@
+{
+  "name": "did-vault",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint",
+    "create-did": "ts-node --project tsconfig.scripts.json scripts/create-did.ts"
+  },
+  "dependencies": {
+    "@hyperledger/identus-edge-agent-sdk": "^6.0.0",
+    "axios": "^1.7.2",
+    "next": "14.2.4",
+    "react": "^18",
+    "react-dom": "^18"
+  },
+  "devDependencies": {
+    "@types/node": "^20",
+    "@types/react": "^18",
+    "@types/react-dom": "^18",
+    "ts-node": "^10.9.2",
+    "typescript": "^5"
+  }
+}

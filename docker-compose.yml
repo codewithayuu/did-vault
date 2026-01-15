@@ -1,0 +1,86 @@
+version: "3.8"
+
+services:
+  db:
+    image: postgres:13
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_MULTIPLE_DATABASES: agent,keycloak
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./scripts/init-db.sh:/docker-entrypoint-initdb.d/init-db.sh
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  prism-node:
+    image: ghcr.io/input-output-hk/prism-node:2.2.1
+    environment:
+      NODE_PSQL_HOST: db:5432
+      NODE_PSQL_DATABASE: agent
+      NODE_PSQL_USERNAME: postgres
+      NODE_PSQL_PASSWORD: postgres
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "50053:50053"
+
+  cloud-agent:
+    image: ghcr.io/hyperledger/identus-cloud-agent:1.37.0
+    environment:
+      PRISM_NODE_HOST: prism-node
+      PRISM_NODE_PORT: 50053
+      VAULT_ADDR: http://vault:8200
+      VAULT_TOKEN: root
+      SECRET_STORAGE_BACKEND: vault
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_NAME: agent
+      DB_USER: postgres
+      DB_PASSWORD: postgres
+      AGENT_DB_HOST: db
+      AGENT_DB_PORT: 5432
+      AGENT_DB_NAME: agent
+      AGENT_DB_USER: postgres
+      AGENT_DB_PASSWORD: postgres
+      DIDCOMM_SERVICE_URL: http://localhost:8090
+      REST_SERVICE_PORT: 8085
+      ADMIN_TOKEN: admin-token
+      API_KEY_ENABLED: "true"
+      API_KEY_AUTHENTICATE_AS_DEFAULT_USER: "true"
+      DEFAULT_WALLET_ENABLED: "true"
+      DEFAULT_WALLET_AUTH_API_KEY: ${AGENT_API_KEY:-changeme}
+    depends_on:
+      db:
+        condition: service_healthy
+      prism-node:
+        condition: service_started
+      vault:
+        condition: service_healthy
+    ports:
+      - "8085:8085"
+      - "8090:8090"
+
+  vault:
+    image: hashicorp/vault:1.13.3
+    environment:
+      VAULT_DEV_ROOT_TOKEN_ID: root
+      VAULT_DEV_LISTEN_ADDRESS: 0.0.0.0:8200
+    cap_add:
+      - IPC_LOCK
+    ports:
+      - "8200:8200"
+    healthcheck:
+      test: ["CMD", "vault", "status"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres_data:
