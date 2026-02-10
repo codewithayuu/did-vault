@@ -1,124 +1,73 @@
-import axios, { AxiosInstance } from "axios";
+import axios, { AxiosInstance, AxiosError } from "axios";
+import type {
+  ManagedDID,
+  DIDDocument,
+  CreateDIDResponse,
+  CredentialRecord,
+  PresentationRecord,
+  AgentHealth,
+} from "@/types";
 
-const BASE_URL =
-  process.env.NEXT_PUBLIC_AGENT_BASE_URL || "http://localhost:8085";
-const API_KEY = process.env.NEXT_PUBLIC_AGENT_API_KEY || "changeme";
+const BASE_URL = process.env.NEXT_PUBLIC_AGENT_BASE_URL ?? "http://localhost:8085";
+const API_KEY = process.env.NEXT_PUBLIC_AGENT_API_KEY ?? "changeme";
 
-export interface DIDDocument {
-  id: string;
-  controller: string;
-  verificationMethod: VerificationMethod[];
-  service?: ServiceEndpoint[];
-  authentication?: string[];
-  assertionMethod?: string[];
-}
-
-export interface VerificationMethod {
-  id: string;
-  type: string;
-  controller: string;
-  publicKeyJwk?: Record<string, string>;
-  publicKeyMultibase?: string;
-}
-
-export interface ServiceEndpoint {
-  id: string;
-  type: string;
-  serviceEndpoint: string | string[];
-}
-
-export interface ManagedDID {
-  did: string;
-  longFormDid?: string;
-  status: string;
-}
-
-export interface CreateDIDResponse {
-  longFormDid: string;
-  scheduledOperation: {
-    id: string;
-    didRef: string;
-  };
-}
-
-export interface CredentialRecord {
-  recordId: string;
-  thid: string;
-  credentialFormat: string;
-  subjectId: string;
-  validityPeriod?: number;
-  claims: Record<string, string>;
-  automaticIssuance: boolean;
-  createdAt: string;
-  protocolState: string;
-  credential?: string;
-  issuingDID?: string;
-}
-
-export interface PresentationRecord {
-  recordId: string;
-  thid: string;
-  status: string;
-  proofRequestData: {
-    challenge: string;
-    domain: string;
-  };
-  createdAt: string;
-  updatedAt?: string;
-}
-
-function createAgentClient(baseURL: string, apiKey: string): AxiosInstance {
-  return axios.create({
+function buildClient(baseURL: string, apiKey: string): AxiosInstance {
+  const instance = axios.create({
     baseURL,
-    headers: {
-      "apikey": apiKey,
-      "Content-Type": "application/json",
-    },
+    headers: { apikey: apiKey, "Content-Type": "application/json" },
+    timeout: 15_000,
   });
+
+  instance.interceptors.response.use(
+    (r) => r,
+    (err: AxiosError) => {
+      const msg =
+        (err.response?.data as Record<string, string>)?.detail ??
+        (err.response?.data as Record<string, string>)?.message ??
+        err.message;
+      return Promise.reject(new Error(msg));
+    }
+  );
+
+  return instance;
 }
 
-const agentClient = createAgentClient(BASE_URL, API_KEY);
+export const agentClient = buildClient(BASE_URL, API_KEY);
 
 export async function createManagedDID(): Promise<CreateDIDResponse> {
-  const payload = {
-    documentTemplate: {
-      publicKeys: [
-        {
-          id: "auth-1",
-          purpose: "authentication",
-        },
-        {
-          id: "issue-1",
-          purpose: "assertionMethod",
-        },
-      ],
-      services: [],
-    },
-  };
-
-  const response = await agentClient.post<CreateDIDResponse>(
+  const res = await agentClient.post<CreateDIDResponse>(
     "/cloud-agent/v1/did-registrar/dids",
-    payload
+    {
+      documentTemplate: {
+        publicKeys: [
+          { id: "auth-1", purpose: "authentication" },
+          { id: "issue-1", purpose: "assertionMethod" },
+        ],
+        services: [],
+      },
+    }
   );
-  return response.data;
+  return res.data;
 }
 
 export async function listManagedDIDs(): Promise<ManagedDID[]> {
-  const response = await agentClient.get<{ contents: ManagedDID[] }>(
+  const res = await agentClient.get<{ contents: ManagedDID[] }>(
     "/cloud-agent/v1/did-registrar/dids"
   );
-  return response.data.contents ?? [];
+  return res.data.contents ?? [];
 }
 
 export async function resolveDID(did: string): Promise<DIDDocument> {
-  const response = await agentClient.get<{ didDocument: DIDDocument }>(
-    `/cloud-agent/v1/dids/${did}` 
+  const res = await agentClient.get<{ didDocument: DIDDocument }>(
+    `/cloud-agent/v1/dids/${encodeURIComponent(did)}`
   );
-  return response.data.didDocument;
+  return res.data.didDocument;
 }
 
 export async function publishDID(did: string): Promise<void> {
-  await agentClient.post(`/cloud-agent/v1/did-registrar/dids/${did}/publications`);
+  await agentClient.post(
+    `/cloud-agent/v1/did-registrar/dids/${encodeURIComponent(did)}/publications`
+  );
 }
 
 export async function issueCredential(params: {
@@ -127,36 +76,34 @@ export async function issueCredential(params: {
   claims: Record<string, string>;
   validityPeriod?: number;
 }): Promise<CredentialRecord> {
-  const payload = {
-    schemaId: null,
-    credentialFormat: "JWT",
-    claims: params.claims,
-    issuingDID: params.issuingDID,
-    issuingKid: "issue-1",
-    subjectId: params.subjectDID,
-    validityPeriod: params.validityPeriod ?? 3600,
-    automaticIssuance: true,
-  };
-
-  const response = await agentClient.post<CredentialRecord>(
+  const res = await agentClient.post<CredentialRecord>(
     "/cloud-agent/v1/issue-credentials/credential-offers",
-    payload
+    {
+      schemaId: null,
+      credentialFormat: "JWT",
+      claims: params.claims,
+      issuingDID: params.issuingDID,
+      issuingKid: "issue-1",
+      subjectId: params.subjectDID,
+      validityPeriod: params.validityPeriod ?? 3600,
+      automaticIssuance: true,
+    }
   );
-  return response.data;
+  return res.data;
 }
 
 export async function listCredentialRecords(): Promise<CredentialRecord[]> {
-  const response = await agentClient.get<{ contents: CredentialRecord[] }>(
+  const res = await agentClient.get<{ contents: CredentialRecord[] }>(
     "/cloud-agent/v1/issue-credentials/records"
   );
-  return response.data.contents ?? [];
+  return res.data.contents ?? [];
 }
 
-export async function getCredentialRecord(recordId: string): Promise<CredentialRecord> {
-  const response = await agentClient.get<CredentialRecord>(
-    `/cloud-agent/v1/issue-credentials/records/${recordId}` 
+export async function getCredentialRecord(id: string): Promise<CredentialRecord> {
+  const res = await agentClient.get<CredentialRecord>(
+    `/cloud-agent/v1/issue-credentials/records/${id}`
   );
-  return response.data;
+  return res.data;
 }
 
 export async function createPresentationRequest(params: {
@@ -164,43 +111,36 @@ export async function createPresentationRequest(params: {
   challenge: string;
   domain: string;
 }): Promise<PresentationRecord> {
-  const payload = {
-    connectionId: params.connectionId,
-    options: {
-      challenge: params.challenge,
-      domain: params.domain,
-    },
-    proofs: [],
-  };
-
-  const response = await agentClient.post<PresentationRecord>(
+  const res = await agentClient.post<PresentationRecord>(
     "/cloud-agent/v1/present-proof/presentations",
-    payload
+    {
+      connectionId: params.connectionId,
+      options: { challenge: params.challenge, domain: params.domain },
+      proofs: [],
+    }
   );
-  return response.data;
+  return res.data;
 }
 
 export async function listPresentations(): Promise<PresentationRecord[]> {
-  const response = await agentClient.get<{ contents: PresentationRecord[] }>(
+  const res = await agentClient.get<{ contents: PresentationRecord[] }>(
     "/cloud-agent/v1/present-proof/presentations"
   );
-  return response.data.contents ?? [];
+  return res.data.contents ?? [];
 }
 
-export async function getPresentation(presentationId: string): Promise<PresentationRecord> {
-  const response = await agentClient.get<PresentationRecord>(
-    `/cloud-agent/v1/present-proof/presentations/${presentationId}` 
+export async function getPresentation(id: string): Promise<PresentationRecord> {
+  const res = await agentClient.get<PresentationRecord>(
+    `/cloud-agent/v1/present-proof/presentations/${id}`
   );
-  return response.data;
+  return res.data;
 }
 
-export async function checkAgentHealth(): Promise<boolean> {
+export async function getAgentHealth(): Promise<AgentHealth> {
   try {
-    await agentClient.get("/cloud-agent/v1/_system/health");
-    return true;
+    const res = await agentClient.get<{ version: string }>("/cloud-agent/v1/_system/health");
+    return { version: res.data.version, status: "ok" };
   } catch {
-    return false;
+    return { version: "unknown", status: "unreachable" };
   }
 }
-
-export { agentClient, createAgentClient };
