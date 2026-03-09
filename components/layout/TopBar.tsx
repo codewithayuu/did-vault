@@ -1,24 +1,16 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { getAgentHealth } from "@/lib/identus";
-import type { AgentHealth } from "@/types";
+import { useAgentHealth } from "@/hooks/useAgentHealth";
 
 export function TopBar() {
-  const [health, setHealth] = useState<AgentHealth | null>(null);
-
-  useEffect(() => {
-    getAgentHealth().then(setHealth);
-    const id = setInterval(() => getAgentHealth().then(setHealth), 30_000);
-    return () => clearInterval(id);
-  }, []);
+  const { health, consecutive } = useAgentHealth();
 
   const statusColor =
     health?.status === "ok"
       ? "var(--success)"
-      : health?.status === "degraded"
-      ? "var(--warning)"
-      : "var(--error)";
+      : consecutive >= 2
+        ? "var(--error)"
+        : "var(--warning)";
 
   return (
     <header
@@ -49,12 +41,21 @@ export function TopBar() {
             animation: health?.status === "ok" ? "pulse 2.4s ease-in-out infinite" : "none",
           }}
         />
-        <span style={{ fontSize: 12, color: "var(--text-secondary)" }}>
+        <span
+          style={{
+            fontSize: 12,
+            color: "var(--text-secondary)",
+            fontFamily:
+              health?.status === "ok" ? "var(--font-mono)" : "inherit",
+          }}
+        >
           {health === null
             ? "Connecting…"
             : health.status === "ok"
-            ? `Agent v${health.version}` 
-            : "Agent unreachable"}
+              ? `v${health.version}`
+              : consecutive >= 2
+                ? "Unreachable"
+                : "Retrying…"}
         </span>
       </div>
 
