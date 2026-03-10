@@ -1,4 +1,8 @@
-import axios, { AxiosInstance, AxiosError } from "axios";
+import axios, {
+  AxiosInstance,
+  AxiosError,
+  InternalAxiosRequestConfig,
+} from "axios";
 import type {
   ManagedDID,
   DIDDocument,
@@ -10,22 +14,55 @@ import type {
 
 const BASE_URL = process.env.NEXT_PUBLIC_AGENT_BASE_URL ?? "http://localhost:8085";
 const API_KEY = process.env.NEXT_PUBLIC_AGENT_API_KEY ?? "changeme";
+const TIMEOUT = 15_000;
+const MAX_RETRY = 2;
+
+function sleep(ms: number) {
+  return new Promise<void>((r) => setTimeout(r, ms));
+}
 
 function buildClient(baseURL: string, apiKey: string): AxiosInstance {
   const instance = axios.create({
     baseURL,
     headers: { apikey: apiKey, "Content-Type": "application/json" },
-    timeout: 15_000,
+    timeout: TIMEOUT,
   });
+
+  instance.interceptors.request.use(
+    (config: InternalAxiosRequestConfig) => {
+      (config as InternalAxiosRequestConfig & { _retryCount?: number })
+        ._retryCount ??= 0;
+      return config;
+    }
+  );
 
   instance.interceptors.response.use(
     (r) => r,
-    (err: AxiosError) => {
-      const msg =
+    async (err: AxiosError) => {
+      const config = err.config as
+        | (InternalAxiosRequestConfig & { _retryCount?: number })
+        | undefined;
+
+      const isRetryable =
+        config &&
+        err.response?.status !== 400 &&
+        err.response?.status !== 401 &&
+        err.response?.status !== 403 &&
+        err.response?.status !== 404 &&
+        (config._retryCount ?? 0) < MAX_RETRY;
+
+      if (isRetryable) {
+        config._retryCount = (config._retryCount ?? 0) + 1;
+        await sleep(600 * config._retryCount);
+        return instance(config);
+      }
+
+      const detail =
         (err.response?.data as Record<string, string>)?.detail ??
         (err.response?.data as Record<string, string>)?.message ??
         err.message;
-      return Promise.reject(new Error(msg));
+
+      return Promise.reject(new Error(detail));
     }
   );
 
@@ -138,8 +175,11 @@ export async function getPresentation(id: string): Promise<PresentationRecord> {
 
 export async function getAgentHealth(): Promise<AgentHealth> {
   try {
-    const res = await agentClient.get<{ version: string }>("/cloud-agent/v1/_system/health");
-    return { version: res.data.version, status: "ok" };
+    const res = await agentClient.get<{ version: string }>(
+      "/cloud-agent/v1/_system/health",
+      { timeout: 5_000 }
+    );
+    return { version: res.data.version ?? "unknown", status: "ok" };
   } catch {
     return { version: "unknown", status: "unreachable" };
   }
